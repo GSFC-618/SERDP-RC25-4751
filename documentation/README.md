@@ -9,6 +9,11 @@ Installed using conda-store <br>
 
 ```global-pecan  /home/conda/global/envs/global-pecan```
 
+<br>
+
+Alexey's Pixi build instructions <br>
+https://github.com/orgs/ccmmf/discussions/157#discussion-9276628
+
 
 ### SIPNET INSTALL
 Example 1. Using Singularity
