@@ -14,6 +14,7 @@ Installed using conda-store <br>
 Alexey's Pixi build instructions <br>
 https://github.com/orgs/ccmmf/discussions/157#discussion-9276628
 
+<br>
 
 ### SIPNET INSTALL
 Example 1. Using Singularity
