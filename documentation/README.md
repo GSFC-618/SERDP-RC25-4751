@@ -1,8 +1,14 @@
 # Documentation for the SERDP RC25-4751 Project
 
 ## Setting up PEcAn
+GitHub: https://github.com/PecanProject/pecan
 
-Airborne SMCE install location (global location)
+
+Airborne SMCE install location (global location) <br>
+Installed using conda-store <br>
+
+```global-pecan  /home/conda/global/envs/global-pecan```
+
 
 ### SIPNET INSTALL
 Example 1. Using Singularity
