@@ -5,7 +5,7 @@
 # and model packages to install
 
 # Example usage:
-# Rscript -e setup_pixi_env.R
+# Rscript setup_pixi_env.R
 
 # Define repo locations
 options(repos = c(
@@ -31,7 +31,8 @@ outdir <- file.path(here(),"install/pecan/pixi/scratch/")
 if (! file.exists(outdir)) dir.create(outdir,recursive=TRUE)
 
 #NOTE: For now, make sure you set the PEcAn direction as WD
-setwd("/Users/sserbin/Data/Github/pecan")
+#setwd("/Users/sserbin/Data/Github/pecan")
+setwd("/efs/shared/users/serdp-project/scratch/pecan")
 
 base <- list.dirs("base", recursive = FALSE)
 modules <- list.dirs("modules", recursive = FALSE)
