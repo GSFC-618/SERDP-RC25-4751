@@ -18,6 +18,8 @@ https://github.com/orgs/ccmmf/discussions/157#discussion-9276628
 
 ### SIPNET INSTALL
 Example 1. 
+GitHub repo for PEcAn: https://github.com/pecanproject/sipnet 
+
 ```
 git clone https://github.com/pecanproject/sipnet
 cd sipnet
