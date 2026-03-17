@@ -47,3 +47,9 @@ po/*~
 
 # RStudio Connect folder
 rsconnect/
+
+# MacOSX
+.DS_Store
+
+# Pixi scratch
+install/pecan/pixi/scratch
