@@ -18,7 +18,10 @@ https://github.com/orgs/ccmmf/discussions/157#discussion-9276628
 
 ### SIPNET INSTALL
 Example 1. 
-GitHub repo for PEcAn: https://github.com/pecanproject/sipnet 
+GitHub repo for PEcAn: https://github.com/pecanproject/sipnet <br>
+Instructions for install: https://github.com/PecanProject/sipnet/blob/master/docs/user-guide/getting-started.md <br>
+
+Airborne SMCE pcluster system-wide install location (for all users): `/shared-ebs/software/models/sipnet`
 
 ```
 git clone https://github.com/pecanproject/sipnet
