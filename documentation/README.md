@@ -21,13 +21,41 @@ Example 1.
 GitHub repo for PEcAn: https://github.com/pecanproject/sipnet <br>
 Instructions for install: https://github.com/PecanProject/sipnet/blob/master/docs/user-guide/getting-started.md <br>
 
+Airborne SMCE `/efs/shared/users/serdp-project/models/sipnet` for use with the RStudio interface (using the Hub login)
+
 Airborne SMCE pcluster system-wide install location (for all users): `/shared-ebs/software/models/sipnet`
+
+
 
 ```
 git clone https://github.com/pecanproject/sipnet
 cd sipnet
 make
 ```
+
+
+
+#### Test runs
+Standard PEcAn Test Runs: https://github.com/PecanProject/pecan/tree/develop/documentation/tutorials
+
+
+
+
+CCMMF example: https://github.com/ccmmf/workflows/tree/main/1a_single_site
+
+SERDP test run example:
+
+SDA test run example:
+
+#### Data storage
+
+
+
+
+####################### CHAFF
+
+
+
 
 Example X. Using Singularity
 
@@ -36,11 +64,4 @@ module load singularity
 singularity pull docker://pecan/model-sipnet-git:develop
 ```
 
-#### Test runs
-CCMMF example: https://github.com/ccmmf/workflows/tree/main/1a_single_site
 
-SERDP test run example:
-
-SDA test run example:
-
-#### Data storage
