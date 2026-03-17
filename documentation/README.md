@@ -17,7 +17,14 @@ https://github.com/orgs/ccmmf/discussions/157#discussion-9276628
 <br>
 
 ### SIPNET INSTALL
-Example 1. Using Singularity
+Example 1. 
+```
+git clone https://github.com/pecanproject/sipnet
+cd sipnet
+make
+```
+
+Example X. Using Singularity
 
 ```
 module load singularity
