@@ -1,12 +1,12 @@
 [workspace]
 authors = [
-  "The PEcAn team"
+  "The PEcAn team, A. Shiklomanov & S. Serbin"
 ]
 channels = ["conda-forge"]
-name = "serdp"
+name = "serdp-rc25-4751"
 # NOTE: win-64 would also be nice, but `r-rjags` is not supported on it
-platforms = ["linux-64","osx-arm64"]
-version = "0.1.0"
+platforms = ["linux-64"]
+version = "0.1.1"
 
 [tasks]
 [tasks.install_gh]
@@ -19,12 +19,10 @@ depends-on = [
   { task = "install_gh", args = [ { pkg = "nneo" }, { repo = "ropensci-archive/nneo" } ] }
 ]
 cmd = "Rscript -e 'pak::repo_add(\"pecanproject.r-universe.dev\")' -e 'pak::pak(c(\"PEcAn.all\", \"PEcAn.SIPNET\"))'"
-#[tasks.myawesometask]
-#cmd = "echo hello world"
 
 [dependencies]
 r = ">=4"
-pandoc = "*"
+pandoc = ">=3.9,<4"
 r-roxygen2 = "==7.3.2"
 r-pak = ">=0.9.2,<0.10"
 "r-abind" = "*"
@@ -265,3 +263,5 @@ r-pak = ">=0.9.2,<0.10"
 "r-zeallot" = "*"
 "r-zip" = "*"
 "r-zoo" = "*"
+ghostscript = ">=10.6.0,<11"
+imagemagick = ">=7.1.1_47,<8"
