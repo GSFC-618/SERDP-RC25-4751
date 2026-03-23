@@ -87,3 +87,13 @@ PEcAn.all::pecan_version()
 To review the install, e.g. 
 
 <img width="601" height="857" alt="Screenshot 2026-03-23 at 5 01 46 PM" src="https://github.com/user-attachments/assets/2df99c69-4c94-4747-b856-9d0896f6627a" />
+
+
+Test load PEcAn.all
+```r
+ library("PEcAn.all")
+```
+
+<img width="443" height="311" alt="Screenshot 2026-03-23 at 5 03 27 PM" src="https://github.com/user-attachments/assets/fd43fb29-ee4a-4cee-b01d-fcd01ef291ee" />
+
+
