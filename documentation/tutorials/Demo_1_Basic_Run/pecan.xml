@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pecan>
+ <info>
+  <notes/>
+  <userid>-1</userid>
+  <username/>
+  <date>2025-06-19-15-34-01</date>
+ </info>
+ <outdir>demo_outdir</outdir>
+ <pfts>
+  <pft>
+   <name>temperate.coniferous</name>
+   <posterior.files>pft/temperate.coniferous/prior.distns.Rdata</posterior.files>
+   <outdir>pft/temperate.coniferous</outdir>
+  </pft>
+ </pfts> 
+ <model>
+  <type>SIPNET</type>
+  <revision>git</revision>
+  <delete.raw>FALSE</delete.raw>
+  <!-- Location of the shared SIPNET model for use on the Airborne SMCE pcluster -->
+  <binary>/shared-ebs/software/models/sipnet/sipnet</binary>
+ </model>
+ <run>
+  <site>
+   <met.start>2004/01/01</met.start>
+   <met.end>2004/12/31</met.end>
+   <name>Niwot Ridge Forest/LTER NWT1 (US-NR1)</name>
+   <lat>40.0329</lat>
+   <lon>-105.546</lon>
+  </site>
+  <inputs>
+   <met>
+    <source>AmerifluxLBL</source>
+    <output>SIPNET</output>
+    <username>serdp</username>
+    <path>
+	    <path1>dbfiles/AMF_US-NR1_BASE_HH_23-5.2004-01-01.2004-12-31.clim</path1>
+    </path>
+   </met>
+  </inputs>
+  <start.date>2004/01/01</start.date>
+  <end.date>2004/12/31</end.date>
+ </run>
+ <host>
+	<name>localhost</name>
+	<qsub>sbatch -v -J @NAME@ -o @STDOUT@ -e @STDERR@</qsub>
+	<qsub.jobid>Submitted batch job ([[:digit:]]+)</qsub.jobid>
+	<!--<qstat>squeue -h -j  @JOBID@ || echo "DONE"</qstat>-->
+	<qstat>squeue --job @JOBID@ || echo DONE</qstat>
+	<outdir>demo_outdir/out</outdir>
+	<rundir>demo_outdir/run</rundir>
+ </host>
+</pecan>
