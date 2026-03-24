@@ -14,4 +14,8 @@ or, for example
 3) XXXX
 4) XXXX
 5) XXXX
-6) XXX
+6) Activate your pixi environment, e.g.
+   ```bash
+   pixi_activate /path/to/pixi/env
+   ```
+7) 
