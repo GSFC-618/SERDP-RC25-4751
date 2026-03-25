@@ -90,3 +90,9 @@ Table: Model Output Variables and Descriptions
 |SWE                        |Snow Water Equivalent                |
 |year                       |Year                                 |
 ```
+
+If all goes well you will end up with example figures in the `demo_outdir/figs` directory displaying some of the SIPNET modeling results, e.g.
+<br>
+
+<img width="800" height="600" alt="sipnet_GPP_NPP_by_time" src="https://github.com/user-attachments/assets/369cfe66-ebb6-4c4f-82ac-b9e057cadd2f" />
+
