@@ -6,11 +6,6 @@ After completing the PEcAn and SIPNET installation and setup, you can test your 
 
 `srun -N 1 -n 2 --mem=8G --time=02:00:00 --pty /bin/bash`
 
-or, for example
-
-`salloc -N 1 -n 2 --mem=8G --time=01:00:00 /bin/bash`
-
-
 2) XXXXX
 3) XXXX
 4) XXXX
