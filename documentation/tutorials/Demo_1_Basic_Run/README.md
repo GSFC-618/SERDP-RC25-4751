@@ -6,11 +6,6 @@ After completing the PEcAn and SIPNET installation and setup, you can test your 
 
 `srun -N 1 -n 2 --mem=8G --time=02:00:00 --pty /bin/bash`
 
-or, for example
-
-`salloc -N 1 -n 2 --mem=8G --time=01:00:00 /bin/bash`
-
-
 2) XXXXX
 3) XXXX
 4) XXXX
@@ -95,3 +90,9 @@ Table: Model Output Variables and Descriptions
 |SWE                        |Snow Water Equivalent                |
 |year                       |Year                                 |
 ```
+
+If all goes well you will end up with example figures in the `demo_outdir/figs` directory displaying some of the SIPNET modeling results, e.g.
+<br>
+
+<img width="800" height="600" alt="sipnet_GPP_NPP_by_time" src="https://github.com/user-attachments/assets/369cfe66-ebb6-4c4f-82ac-b9e057cadd2f" />
+
