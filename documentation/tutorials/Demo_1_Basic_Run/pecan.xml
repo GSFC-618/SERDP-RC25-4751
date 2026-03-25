@@ -44,11 +44,5 @@
  </run>
  <host>
 	<name>localhost</name>
-	<qsub>sbatch -v -J @NAME@ -o @STDOUT@ -e @STDERR@</qsub>
-	<qsub.jobid>Submitted batch job ([[:digit:]]+)</qsub.jobid>
-	<!--<qstat>squeue -h -j  @JOBID@ || echo "DONE"</qstat>-->
-	<qstat>squeue --job @JOBID@ || echo DONE</qstat>
-	<outdir>demo_outdir/out</outdir>
-	<rundir>demo_outdir/run</rundir>
  </host>
 </pecan>
