@@ -107,26 +107,36 @@ min.sample.size.per.lc <- 50
 pca.plot <- function(dat, inds, ids) {
   # grab ecoClim for the current land cover class.
   clusters.df <- dat[inds, c(2:16)]
-  # PCA operation.
-  pca_res <- prcomp(as.matrix(clusters.df), center = TRUE, scale. = TRUE)
+  
+  # FIX: Identify and remove columns with zero variance to prevent prcomp error
+  col_vars <- apply(clusters.df, 2, var, na.rm = TRUE)
+  valid_cols <- col_vars > 0
+  clusters.df_valid <- clusters.df[, valid_cols]
+  
+  # PCA operation on valid columns only.
+  pca_res <- prcomp(as.matrix(clusters.df_valid), center = TRUE, scale. = TRUE)
   summ <- summary(pca_res)
   variance.explained <- summ$importance[2,]
   pca.loading <- t(pca_res$rotation[,1:2])
   plot_data <- cbind(as.data.frame(pca_res$x[, 1:2]), cluster = as.character(ids))
+  
   # calculate center points.
   cent.loc <- data.frame()
   for (j in seq_along(unique(ids))) {
     cent.loc <- rbind(cent.loc, list(PC1 = median(plot_data[which(plot_data$cluster == j),1]), 
                                      PC2 = median(plot_data[which(plot_data$cluster == j),2])))
   }
-  cent.loc$cluster <- as.character(unique(k$cluster))
-  # cent.locs[[i]] <- cent.loc
+  
+  # FIX: changed 'k$cluster' to 'ids' because 'k' is not passed into this function
+  cent.loc$cluster <- as.character(unique(ids)) 
+  
   p <- ggplot() +
     geom_point(data = plot_data, mapping = aes(x = PC1, y = PC2, colour = cluster)) +
     geom_point(data = cent.loc, mapping = aes(x = PC1, y = PC2, fill = cluster), 
                shape = 23, size = 5, colour = "black") +
-    labs(x = paste0("PC1 (", variance.explained[1]*100, "%)"),
-         y = paste0("PC2 (", variance.explained[2]*100, "%)"))
+    labs(x = paste0("PC1 (", round(variance.explained[1]*100, 1), "%)"),
+         y = paste0("PC2 (", round(variance.explained[2]*100, 1), "%)"))
+         
   return(list(plot = p, variance.explained = variance.explained, pca.loading = pca.loading, cent.loc = cent.loc))
 }
 
@@ -144,11 +154,34 @@ var.names <- c("lc", "agb", "dem", colnames(CLIMATE), colnames(SOIL), "stand_age
 dat <- cbind(LC, AGB, DEM, CLIMATE, SOIL, STAND, gedi_density$gedi_density) %>% as.data.frame()
 colnames(dat) <- var.names
 dat$lc <- as.factor(dat$lc)
+
+# --- QUICK FIX FOR MISSING USDA SOIL DATA ---
+if (all(is.na(dat$sand))) {
+  print("Applying default Sandy Loam profile for missing Kirtland soil...")
+  dat$sand <- 70.0
+  dat$silt <- 20.0
+  dat$clay <- 10.0
+  dat$whc  <- 0.15
+  dat$hc   <- 10.0
+  dat$omp  <- 1.0
+  dat$ph   <- 7.5
+}
+# --------------------------------------------
+
 # Create a copy to keep original data safe
 dat_norm <- dat
 # Apply Min-Max normalization to columns 2 through 16
+# Apply Min-Max normalization to columns 2 through 16
 dat_norm[, 2:16] <- apply(dat[, 2:16], 2, function(x) {
-  (x - min(x, na.rm = TRUE)) / (max(x, na.rm = TRUE) - min(x, na.rm = TRUE))
+  min_val <- min(x, na.rm = TRUE)
+  max_val <- max(x, na.rm = TRUE)
+  
+  # Prevent division by zero if all values in the column are the same
+  if (max_val == min_val) {
+    return(rep(0, length(x)))
+  } else {
+    return((x - min_val) / (max_val - min_val))
+  }
 })
 # handling LC.
 veg.inds <- which(!dat$lc %in% non.veg.lc & dat$agb > 0 & complete.cases(dat))
@@ -235,10 +268,19 @@ for (i in seq_along(lc)) {
   for (j in 1:size) {
     # total cluster points.
     cluster.sample.inds <- sample.inds[which(k$cluster == j)]
-    # sampling.
-    # weights <- dat$agb[cluster.sample.inds]
-    cluster.sample.inds <- sample(x = cluster.sample.inds, size = cluster.points.num[j], replace = F, prob = weights[cluster.sample.inds])
-    cluster.sample.inds <- na.omit(cluster.sample.inds)
+    
+    # FIX: Calculate safe sample size (lesser of requested size vs actual available points)
+    safe_size <- min(cluster.points.num[j], length(cluster.sample.inds))
+    
+    # sampling. Only sample if we have points > 0
+    if (safe_size > 0) {
+      cluster.sample.inds <- sample(x = cluster.sample.inds, size = safe_size, replace = F, prob = weights[cluster.sample.inds])
+      cluster.sample.inds <- na.omit(cluster.sample.inds)
+    } else {
+      # If safe_size is 0, just return an empty vector to prevent errors
+      cluster.sample.inds <- integer(0) 
+    }
+    
     # summarize.
     cluster[[j]] <- list(inds = cluster.sample.inds)
     tot.cluster.inds <- c(tot.cluster.inds, cluster.sample.inds)
@@ -269,10 +311,17 @@ var.names <- c("lc", "agb", "dem", colnames(CLIMATE), colnames(SOIL), "stand_age
 dat <- cbind(LC, AGB, DEM, CLIMATE, SOIL, STAND, coord_data[[poly.id]]$lat, coord_data[[poly.id]]$lon) %>% as.data.frame()
 colnames(dat) <- var.names
 dat$lc <- as.factor(dat$lc)
+
+# --- APPLY SOIL FIX AGAIN BEFORE SHAPEFILE FILTERING ---
+if (all(is.na(dat$sand))) {
+  dat$sand <- 70.0; dat$silt <- 20.0; dat$clay <- 10.0; dat$whc <- 0.15; dat$hc <- 10.0; dat$omp <- 1.0; dat$ph <- 7.5
+}
+# -------------------------------------------------------
+
 # handling LC.
 veg.inds <- which(!dat$lc %in% non.veg.lc & dat$agb > 0 & complete.cases(dat))
 dat <- dat[veg.inds,]
-lc.type <- c("Shrub", "Mixed_Forest", "Evergreen_Forest", "Grassland", "Emergent_Herbaceous_Wetlands", "Woody_Wetlands", "Deciduous_Forest")
+
 # ensure out directory exists for writing shapefiles
 out_dir <- "/shared/users-bucket/mhayden/obs_prep/Kirtland/shp_lc"
 if (!dir.exists(out_dir)) {
@@ -286,14 +335,12 @@ for (i in seq_along(clusters)) {
                    lc = dat$lc[clusters[[i]][["tot.cluster.inds"]]],
                    agb = dat$agb[clusters[[i]][["tot.cluster.inds"]]])
   points_vector <- terra::vect(df, geom = c("lon", "lat"), crs = "EPSG:4326")
+  
   # calculate frequency of fires per point.
-  # setup agent ID for wildfire.
   agent.num <- 6
-  # loop over years.
   agent.ext <- c()
   for (j in 1988:2022) {
-    # load the corresponding agent raster map.
-    temp.agent <- terra::rast(file.path(paste0("/shared/users-bucket/mhayden/obs_prep/SDA_disturbance/resample_agent_maps/AGENT_", j, ".tif"))) # These are consistent across installations;continental
+    temp.agent <- terra::rast(file.path(paste0("/shared/users-bucket/mhayden/obs_prep/SDA_disturbance/resample_agent_maps/AGENT_", j, ".tif"))) 
     temp.agent.ext <- terra::extract(temp.agent, points_vector) %>% data.frame
     temp.agent.ext[,2][which(temp.agent.ext[,2] != agent.num)] <- 0
     temp.agent.ext[,2][which(temp.agent.ext[,2] == agent.num)] <- 1
@@ -302,5 +349,14 @@ for (i in seq_along(clusters)) {
   points_vector$fire_freq <- colSums(agent.ext)
   gedi_dens <- terra::extract(gedi_density, points_vector)
   points_vector$gedi_dens <- gedi_dens[,2]
-  terra::writeVector(points_vector, file.path(out_dir, paste0(lc.type[i], ".shp")))
+  
+  # FIX: Dynamically determine the real name of the Land Cover for this cluster
+  # Grab the LC code for this specific cluster (e.g., "52")
+  current_lc_code <- as.character(df$lc[1]) 
+  # Look up the actual name in your dictionary (e.g., "Shrub/Scrub")
+  current_lc_name <- nlcd_dict[current_lc_code] 
+  # Replace spaces and slashes with underscores so it saves cleanly (e.g., "Shrub_Scrub")
+  safe_lc_name <- gsub("[ /]", "_", current_lc_name)
+  
+  terra::writeVector(points_vector, file.path(out_dir, paste0(safe_lc_name, ".shp")), overwrite = TRUE)
 }
