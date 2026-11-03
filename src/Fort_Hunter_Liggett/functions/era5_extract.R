@@ -1,9 +1,12 @@
+# Code to extract ERA5 weather data for observations and initial conditions
+
 # 1. Load Required Libraries
 library(PEcAn.all)
 library(PEcAn.data.atmosphere)
 library(ecmwfr)
 library(lubridate)
 library(purrr)
+library(terra)
 
 # Download ERA5
 raw_ERA5_dir <- "/shared/users-bucket/mhayden/obs_prep/SDA_disturbance/example_polygon/ERA5"
@@ -34,3 +37,53 @@ PEcAn.data.atmosphere::download.ERA5_cds(
 )
 
 gc()
+
+# Since there are both inst and accum variables, we end up with a .zip per year
+# these need to be combined into a single .nc per year
+
+# Define the directory where your downloaded ERA5 .zip files are located
+raw_ERA5_dir <-  "/shared/users-bucket/mhayden/obs_prep/Kirtland/ERA5"
+
+# Get a list of all .zip files
+zip_files <- list.files(raw_ERA5_dir, pattern = "\\.zip$", full.names = TRUE)
+
+for (z in zip_files) {
+  # What the final file should be named
+  expected_nc <- sub("\\.zip$", ".nc", z)
+  
+  # See what the files inside the zip are actually named
+  inside_files <- unzip(z, list = TRUE)$Name
+  
+  if (length(inside_files) != 2) {
+    warning(sprintf("Expected 2 files in %s, but found %d. Skipping...", basename(z), length(inside_files)))
+    next
+  }
+  
+  # Extract the files
+  unzip(z, exdir = raw_ERA5_dir)
+  
+  # Get full paths of the two extracted files
+  file1 <- file.path(raw_ERA5_dir, inside_files[1])
+  file2 <- file.path(raw_ERA5_dir, inside_files[2])
+  
+  cat(sprintf("Merging files into %s using CDO...\n", basename(expected_nc)))
+  
+  # Construct the CDO command
+  # -O overwrites existing files
+  # -f nc forces the output to be strict NetCDF format
+  cdo_cmd <- sprintf("cdo -O -f nc merge %s %s %s", file1, file2, expected_nc)
+  
+  # Run CDO directly from R
+  exit_status <- system(cdo_cmd)
+  
+  # Only delete files if the merge was successful (exit status 0)
+  if (exit_status == 0) {
+    unlink(c(file1, file2))
+    unlink(z)
+    cat(sprintf("Successfully created: %s\n\n", basename(expected_nc)))
+  } else {
+    warning(sprintf("Failed to merge files for %s. Ensure CDO is loaded on your cluster ('module load cdo').", basename(z)))
+  }
+}
+
+cat("All files unzipped and merged successfully! The data is now ready for ERA5_met_process.\n")
