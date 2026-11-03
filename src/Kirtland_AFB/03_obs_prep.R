@@ -23,6 +23,9 @@
 
 # Data Prep
 
+# most of this came from data prep, combine it with IC and Observation scripts since some of that is already in here??
+# confusing how things are organized so far
+
 knitr::opts_chunk$set(echo = TRUE)
 library(dplyr)
 library(xts)
@@ -493,6 +496,7 @@ phenology.path <- PEcAn.data.remote::extract_phenology_MODIS(site_info = site_in
                                                              outdir = "/shared/users-bucket/mhayden/obs_prep/Kirtland", 
                                                              run_parallel = T, ncores = 10)
 
+
 # soil texture.
 # need to transfer this R code over...
 source("/shared/users-local/mhayden/SERDP-RC25-4751-1/src/Fort_Hunter_Liggett/functions/soilgrids_texture_extract.R")
@@ -589,144 +593,7 @@ save(list = c("agb.mean", "agb.std"), file = "/shared/users-bucket/mhayden/obs_p
 
 source("/shared/users-local/mhayden/SERDP-RC25-4751-1/src/Fort_Hunter_Liggett/functions/NASA_DAAC_download.R")
 # MODIS CSV prep function.
-MODIS.CSV.prep <- function(pts, extent, from, to, download.outdir, csv.outdir) {
-  # load previous CSV file.
-  if (file.exists(file.path(csv.outdir, "LAI.csv"))) {
-    previous.csv <- read.csv(file.path(csv.outdir, "LAI.csv"), 
-                             colClasses = c("character", rep("numeric", 5), "character"))
-  } else {
-    previous.csv <- NULL
-  }
-  # setup the foreach parallel computation.
-  cl <- parallel::makeCluster(parallel::detectCores())
-  doParallel::registerDoParallel(cl)
-  # reproject site locations to MODIS projection.
-  site.ids <- seq_along(pts) %>% as.character()
-  site.locs <- terra::crds(pts)
-  pts <- data.frame(lon = site.locs[,1], lat = site.locs[,2])
-  sp::coordinates(pts) <- ~lon+lat
-  sp::proj4string(pts) <- sp::CRS("+proj=longlat +datum=WGS84")
-  pts.reproj <- sp::spTransform(pts, "+proj=sinu +a=6371007.181 +b=6371007.181 +units=m")
-  coords.reproj <- sp::coordinates(pts.reproj) %>% `colnames<-`(c("x", "y"))
-  # download data.
-  metadata <- NASA_DAAC_download(ul_lat = extent[4], 
-                                 ul_lon = extent[1], 
-                                 lr_lat = extent[3], 
-                                 lr_lon = extent[2], 
-                                 from = from,
-                                 to = to, 
-                                 just_path = F,
-                                 outdir = download.outdir,
-                                 doi = "10.5067/MODIS/MCD15A3H.061",
-                                 ncore = parallel::detectCores()-1,
-                                 credential.folder = "~")
-  # grab file paths for downloaded hdf files.
-  modis.out <- list.files(download.outdir, full.names = T, pattern = "*.hdf")
-  # grab id for each file.
-  ids <- basename(modis.out)
-  # split string.
-  splits <- strsplit(x = ids, split = ".", fixed = T)
-  # collect attributes table (date, ih, and iv).
-  dates <- ivs <- ihs <- c()
-  for (i in seq_along(ids)) {
-    temp <- splits[[i]]
-    # calculate dates based on year and day of year.
-    y.doy <- substr(temp[[2]], 2, 8)
-    year <- substr(y.doy, 1, 4)
-    doy <- substr(y.doy, 5, 7)
-    dates <- c(dates, as.character(as.Date(paste(year, doy), format="%Y %j")))
-    # extract tile id.
-    ihs <- c(ihs, substr(temp[[3]], 2, 3))
-    ivs <- c(ivs, substr(temp[[3]], 5, 6))
-  }
-  # create data frame of extents for MODIS tiles.
-  # record progress.
-  message("\nCreating information table for downloaded MODIS tiles.")
-  doSNOW::registerDoSNOW(cl)
-  pb <- utils::txtProgressBar(min=1, max=length(modis.out), style=3)
-  progress <- function(n) utils::setTxtProgressBar(pb, n)
-  opts <- list(progress=progress)
-  MODIS.tiles.extents <- foreach::foreach(
-    tile = modis.out,
-    .packages=c("terra", "Kendall"),
-    .options.snow=opts
-  ) %dopar% {
-    return(as.vector(terra::ext(terra::rast(tile))))
-  } %>% dplyr::bind_rows()
-  MODIS.tiles.info <- cbind(dates, ihs, ivs, MODIS.tiles.extents)
-  # filter dates.
-  unique.dates <- unique(MODIS.tiles.info$dates)
-  unique.dates <- unique.dates[which(as.Date(unique.dates) >= from &
-                                     as.Date(unique.dates) <= to)]
-  # find inds of file paths that match each point.
-  message("\nFinding indexes of file paths that match each point.")
-  pb <- utils::txtProgressBar(min=1, max=length(pts), style=3)
-  progress <- function(n) utils::setTxtProgressBar(pb, n)
-  opts <- list(progress=progress)
-  tile.ids <- foreach::foreach(
-    i = as.numeric(site.ids),
-    .packages="Kendall",
-    .options.snow=opts
-  ) %dopar% {
-    # filter tile position ids based on lat/lon range.
-    inds <- which(as.Date(MODIS.tiles.info$dates) >= from & 
-                    as.Date(MODIS.tiles.info$dates) <= to & 
-                    coords.reproj[i, "x"] > MODIS.tiles.info$xmin & 
-                    coords.reproj[i, "x"] < MODIS.tiles.info$xmax & 
-                    coords.reproj[i, "y"] > MODIS.tiles.info$ymin &
-                    coords.reproj[i, "y"] < MODIS.tiles.info$ymax)
-    names(inds) <- rep(i,length(inds))
-    return(inds)
-  } %>% unlist
-  # extract MODIS products.
-  # loop over tiles.
-  message("\nExtracting MODIS datasets by points.")
-  unique.tile.ids <- sort(unique(tile.ids)) 
-  pb <- utils::txtProgressBar(min=1, max=length(unique.tile.ids), style=3)
-  progress <- function(n) utils::setTxtProgressBar(pb, n)
-  opts <- list(progress=progress)
-  outputs <- foreach::foreach(
-    i = unique.tile.ids,
-    .packages=c("purrr", "Kendall"),
-    .options.snow=opts
-  ) %dopar% {
-    temp.tile <- terra::rast(modis.out[i])
-    points.inds <- as.numeric(names(tile.ids)[which(tile.ids == i)])
-    temp.res <- terra::extract(temp.tile, data.frame(x = coords.reproj[points.inds, "x"],
-                                                     y = coords.reproj[points.inds, "y"]))
-    # convert QC flag.
-    qc <- temp.res[,4] %>% purrr::map(function(v){
-      qc_flag <- intToBits(as.integer(v)) # NB big-endian (ones place first)
-      qc_flag <- as.integer(rev(utils::head(qc_flag, 3))) # now ones place last
-      paste(qc_flag, collapse = "")
-    }) %>% unlist
-    # write into table.
-    temp.res <- data.frame(date = rep(MODIS.tiles.info$dates[i], length(points.inds)),
-                           site_id = points.inds, 
-                           lat = site.locs[points.inds, "y"],
-                           lon = site.locs[points.inds, "x"],
-                           lai = temp.res[,3],
-                           sd = temp.res[,7],
-                           qc = qc)
-    return(temp.res)
-  } %>% dplyr::bind_rows()
-  # stop parallel.
-  parallel::stopCluster(cl)
-  foreach::registerDoSEQ()
-  # combine with previous CSV file.
-  if (!is.null(previous.csv)) {
-    outputs <- rbind(previous.csv, outputs)
-    outputs <- outputs[!duplicated(outputs),]
-  }
-  # filter by QC band.
-  outputs <- outputs[which(outputs$qc %in% c("000", "001")),]
-  # write into CSV file.
-  write.csv(outputs, file = file.path(csv.outdir, "LAI.csv"), row.names = F)
-  # delete downloaded files.
-  unlink(list.files(download.outdir, full.names = T), recursive = T)
-  return(outputs)
-} # this is dongchen's function
-# this is the 'optimized version'
+# this is the 'optimized version', not dongchen's original
 source("/shared/users-local/mhayden/SERDP-RC25-4751-1/src/Fort_Hunter_Liggett/functions/modis_prep.R")
 
 extent <- terra::ext(terra::vect("/shared/users-bucket/mhayden/obs_prep/Kirtland/selected_polygons/selected_polygons.shp")[,3])
@@ -741,15 +608,18 @@ for (i in seq_along(from)) {
   print(from[i])
   outputs <- MODIS.CSV.prep(pts = pts, extent = extent, from = from[i], to = to[i], download.outdir = download.outdir, csv.outdir = csv.outdir)
 }
+# clear broken files if needed
+# unlink("/shared/users-bucket/mhayden/obs_prep/Kirtland/LAI/download/*")
 
 # SM.
 ## SMAP.
+# This is not working - skip for now...
 
-# source("/projectnb/dietzelab/dongchen/anchorSites/Obs/SMAP_download/NASA_DAAC_Download.R")
-# MODIS CSV prep function.
-library(foreach)
-library(purrr)
-# SMAP.
+# code test
+i <- 1
+from <- from[1]
+to <- to[1]
+
 SMAP.CSV.Prep <- function(site.ids, site.locs, extent, from, to, download.outdir, csv.outdir) {
   # SMAP CRS, EPSG:6933.
   smap.crs <- "+proj=cea +lat_ts=30 +lon_0=0 +x_0=0 +y_0=0 +datum=WGS84 +units=m +no_defs"
@@ -767,29 +637,58 @@ SMAP.CSV.Prep <- function(site.ids, site.locs, extent, from, to, download.outdir
   pts.reproj <- sp::spTransform(pts, smap.crs)
   coords.reproj <- sp::coordinates(pts.reproj) %>% `colnames<-`(c("x", "y"))
   # download data.
-  metadata <- PEcAn.data.remote::NASA_DAAC_download(ul_lat = extent[4], 
-                                 ul_lon = extent[1], 
-                                 lr_lat = extent[3], 
-                                 lr_lon = extent[2], 
+  metadata <- PEcAn.data.remote::NASA_DAAC_download(ul_lat = as.numeric(extent[4]), # need to convert to numeric or hardcode; won't recognize otherwise.
+                                 ul_lon = as.numeric(extent[1]), 
+                                 lr_lat = as.numeric(extent[3]), 
+                                 lr_lon = as.numeric(extent[2]), 
                                  from = from,
                                  to = to, 
                                  just_path = F,
                                  outdir = download.outdir,
                                  credential_path = "~/.netrc",
                                  doi = "10.5067/02LGW4DGJYRX",
-                                 ncore = parallel::detectCores()-1)
+                                 ncore = 1)
+  print("Finished downloading files")                               
   smap.out <- metadata
+
+  if (length(smap.out) == 0 || is.na(smap.out[1])) {
+    warning(paste("No files downloaded for date:", from))
+    return(NULL) # Skip this date safely and move to the next iteration
+  }
+  
+  print("Opening first file")
   file <- smap.out[1] # select the first file.
+  
   # grab smap extents, it's from the ArcGIS report using the SMAP H5 file.
   smap.ext <- c(-17363027.292480, 17367529.945160, -7319045.227051, 7310037.171387) %>% terra::ext()
-  # convert h5 file to raster.
-  smap <- terra::rast(file)
-  # add extent and crs to the raster.
-  terra::ext(smap) <- smap.ext#terra::ext(pr_extent)
-  terra::crs(smap) <- smap.crs
-  # extract values for smp and std.
-  smp <- terra::extract(smap[["sm_rootzone_analysis"]], coords.reproj) * 100
-  std <- terra::extract(smap[["sm_rootzone_analysis_ensstd"]], coords.reproj) * 100
+  
+  # 1. Format the file paths as specific GDAL Subdatasets so terra doesn't scan the whole file
+  smp_path <- paste0('HDF5:"', file, '"://Analysis_Data/sm_rootzone_analysis')
+  std_path <- paste0('HDF5:"', file, '"://Analysis_Data/sm_rootzone_analysis_ensstd')
+  
+  # 2. Open just those specific variables
+  smp_rast <- terra::rast(smp_path)
+  std_rast <- terra::rast(std_path)
+  
+  # 3. Add extent and crs
+  terra::ext(smp_rast) <- smap.ext
+  terra::crs(smp_rast) <- smap.crs
+  
+  terra::ext(std_rast) <- smap.ext
+  terra::crs(std_rast) <- smap.crs
+
+  # Needs to be flipped to right orientation
+  smp_rast <- terra::flip(smp_rast, direction = "vertical")
+  std_rast <- terra::flip(std_rast, direction = "vertical")
+  
+  # -9999 means NA
+  terra::NAflag(smp_rast) <- -9999
+  terra::NAflag(std_rast) <- -9999
+  
+  # 4. Extract values 
+  print("Extracting values from rasters")
+  smp <- terra::extract(smp_rast, coords.reproj) * 100
+  std <- terra::extract(std_rast, coords.reproj) * 100
   
   # terra::writeRaster(smp, "/projectnb/dietzelab/dongchen/anchorSites/Obs/SMAP_download/download/smap.tif")
   # construct final data frame.
@@ -815,26 +714,33 @@ SMAP.CSV.Prep <- function(site.ids, site.locs, extent, from, to, download.outdir
   unlink(list.files(download.outdir, full.names = T), recursive = T)
   return(outputs)
 }
+#source("/shared/users-local/mhayden/SERDP-RC25-4751-1/src/Fort_Hunter_Liggett/functions/smap_prep.R")
 
-base.map <- terra::rast("/projectnb/dietzelab/dongchen/anchorSites/downscale/base_map.tiff")
-extent <- terra::ext(base.map)
-pts <- terra::vect("/projectnb/dietzelab/dongchen/SDA_disturbance/example_polygon/shp_all/combined_layers.shp")
+pts <- terra::vect("/shared/users-bucket/mhayden/obs_prep/Kirtland/shp_all/combined_layers.shp")
+extent <- terra::ext(terra::vect("/shared/users-bucket/mhayden/obs_prep/Kirtland/selected_polygons/selected_polygons.shp")[,3])
 site.locs <- terra::crds(pts)
+
 from <- seq(as.Date("2015-07-15"), as.Date("2024-07-15"), by = "1 year")
 to <- seq(as.Date("2015-07-16"), as.Date("2024-07-16"), by = "1 year")
-download.outdir <- "/projectnb/dietzelab/dongchen/SDA_disturbance/example_polygon/observation/SM/SMAP/download"
-csv.outdir <- "/projectnb/dietzelab/dongchen/SDA_disturbance/example_polygon/observation/SM/SMAP"
+csv.outdir <- "/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/SMAP"
+download.outdir <- "/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/SMAP/download"
+dir.create(download.outdir, showWarnings = FALSE, recursive = TRUE)
+
 for (i in seq_along(from)) {
   print(paste0("\n", from[i]))
   outputs <- SMAP.CSV.Prep(as.character(seq_along(pts)), site.locs, extent = extent, from = from[i], to = to[i], download.outdir = download.outdir, csv.outdir = csv.outdir)
 }
+# clear broken files if needed
+#unlink("/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/download/*")
 
 ## ERA5 soil moisture and LAI.
-library(ecmwfr)
-area <- round(c(36.5, -122, 35.5, -121), 2)
-years <- 2000:2024
-outfolder <- "/projectnb/dietzelab/dongchen/SDA_disturbance/example_polygon/observation/SM/ERA5"
-ecmwfr::wf_set_key(user = "zhangdc@bu.edu", key = "a9071675-dd49-443b-8f90-cf8da32d3821")
+
+area <- round(c(35.07, -106.62, 34.94, -106.36), 2)
+years <- 2012:2024
+outfolder <- "/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/ERA5"
+dir.create(outfolder, showWarnings = FALSE, recursive = TRUE)
+# no password, just press ENTER
+ecmwfr::wf_set_key(user = "meghan.t.hayden@nasa.gov", key = "e18bd11d-f60a-4d39-a2be-94a4cf0d5d64")
 # loop over years.
 nc.paths <- c()
 for (y in years) {
@@ -844,6 +750,7 @@ for (y in years) {
     dataset_short_name = "reanalysis-era5-single-levels",
     product_type = list("ensemble_members"),
     data_format = 'netcdf',
+    format = "netcdf",
     download_format = "unarchived",
     day = list("15"),
     time = list("00:00", "03:00", "06:00",
@@ -864,107 +771,527 @@ for (y in years) {
   # Submit request using ecmwfr
   ecmwfr::wf_request(
       request = request,
-      user = "zhangdc@bu.edu",
+      user = "meghan.t.hayden@nasa.gov",
       path = outfolder,
       time_out = 36000
     )
 }
 
 # SOC
-library(dplyr)
-library(sf)
-library(terra)
-library(dplyr)
 
-mukey.rast <- terra::rast("/projectnb/dietzelab/dongchen/SDA_disturbance/ALL_SSURGO_10_01_2025_gpkg/muraster_30m_resample.tif")
+# First AI optimized version
 
-# Load the attribute table from the GeoPackage (once extraction is 100%)
-gpkg_path <- "/projectnb/dietzelab/dongchen/SDA_disturbance/ALL_SSURGO_10_01_2025_gpkg/2025_ALL_SSURGO.gpkg"
-attributes <- st_read(gpkg_path, layer = "chorizon") # 'chorizon' contains the physical properties
-
-# 1. Load the component table from your GPKG
-components <- st_read(gpkg_path, layer = "component")
-# If they do, create the column manually:
-components$cokey <- rownames(components)
-# This forces the internal rowid (cokey) to be readable
+# SOC SSURGO Processing
+mukey.rast <- terra::rast("/shared/users-bucket/mhayden/obs_prep/SDA_disturbance/ALL_SSURGO_10_01_2025_gpkg/muraster_30m_resample.tif")
+gpkg_path <- "/shared/users-bucket/mhayden/obs_prep/SDA_disturbance/ALL_SSURGO_10_01_2025_gpkg/2025_ALL_SSURGO.gpkg"
+attributes <- st_read(gpkg_path, layer = "chorizon")
 components <- st_read(gpkg_path, query = "SELECT rowid AS cokey, * FROM component")
-# merge the cockey field to the attribute table.
-attributes_with_mukey <- merge(
-  attributes, 
-  components[, c("mukey", "cokey")], 
-  by = "cokey"
-)
 
-# STEP 1: Calculate SOC per individual component (cokey) capped at 200cm
+attributes_with_mukey <- merge(attributes, components[, c("mukey", "cokey")], by = "cokey")
+
 soc_by_component <- attributes_with_mukey %>%
-  select(
-    mukey, cokey, hzname, hzdept_r, hzdepb_r,
-    om_l, om_r, om_h, 
-    dbthirdbar_l, dbthirdbar_r, dbthirdbar_h, 
-    sieveno10_r
-  ) %>%
-  filter(!is.na(hzdept_r) & !is.na(hzdepb_r)) %>%
-  filter(hzdept_r < 200) %>% # Increased to 200cm
-  mutate(
-    hzdepb_r = ifelse(hzdepb_r > 200, 200, hzdepb_r), # Capped at 200cm
-    thick = hzdepb_r - hzdept_r
-  ) %>%
-  # Handle missing data safely
-  mutate(
-    om_l = ifelse(is.na(om_l), 0, om_l),
-    om_r = ifelse(is.na(om_r), 0, om_r),
-    om_h = ifelse(is.na(om_h), 0, om_h),
-    dbthirdbar_l = ifelse(is.na(dbthirdbar_l), 1.1, dbthirdbar_l),
-    dbthirdbar_r = ifelse(is.na(dbthirdbar_r), 1.3, dbthirdbar_r),
-    dbthirdbar_h = ifelse(is.na(dbthirdbar_h), 1.5, dbthirdbar_h),
-    frag = ifelse(is.na(sieveno10_r), 0, 100 - sieveno10_r)
-  ) %>%
-  # Calculate Low, Rep, and High SOC for each horizon layer
-  mutate(
-    soc_hz_low  = (om_l * 0.58 / 100) * dbthirdbar_l * ((100 - frag) / 100) * thick * 10,
-    soc_hz_mean = (om_r * 0.58 / 100) * dbthirdbar_r * ((100 - frag) / 100) * thick * 10,
-    soc_hz_high = (om_h * 0.58 / 100) * dbthirdbar_h * ((100 - frag) / 100) * thick * 10
-  ) %>%
-  # Convert the low/high range into an estimated standard deviation for the layer
-  mutate(soc_hz_sd = (soc_hz_high - soc_hz_low) / 4) %>%
-  # Aggregate vertically by component profile
-  group_by(mukey, cokey) %>%
-  summarize(
-    comp_soc_mean = sum(soc_hz_mean, na.rm = TRUE),
-    comp_soc_sd   = sqrt(sum(soc_hz_sd^2, na.rm = TRUE)), 
-    comp_depth    = sum(thick),
-    .groups = "drop"
-  )
+  dplyr::select(mukey, cokey, hzname, hzdept_r, hzdepb_r, om_l, om_r, om_h, dbthirdbar_l, dbthirdbar_r, dbthirdbar_h, sieveno10_r) %>%
+  dplyr::filter(!is.na(hzdept_r) & !is.na(hzdepb_r), hzdept_r < 200) %>%
+  dplyr::mutate(hzdepb_r = ifelse(hzdepb_r > 200, 200, hzdepb_r), thick = hzdepb_r - hzdept_r) %>%
+  dplyr::mutate(om_l = coalesce(om_l, 0), om_r = coalesce(om_r, 0), om_h = coalesce(om_h, 0),
+         dbthirdbar_l = coalesce(dbthirdbar_l, 1.1), dbthirdbar_r = coalesce(dbthirdbar_r, 1.3),
+         dbthirdbar_h = coalesce(dbthirdbar_h, 1.5), frag = coalesce(100 - sieveno10_r, 100)) %>%
+  mutate(soc_hz_low  = (om_l * 0.58 / 100) * dbthirdbar_l * (frag / 100) * thick * 10,
+         soc_hz_mean = (om_r * 0.58 / 100) * dbthirdbar_r * (frag / 100) * thick * 10,
+         soc_hz_high = (om_h * 0.58 / 100) * dbthirdbar_h * (frag / 100) * thick * 10) %>%
+  dplyr::mutate(soc_hz_sd = (soc_hz_high - soc_hz_low) / 4) %>%
+  dplyr::group_by(mukey, cokey) %>%
+  dplyr::summarize(comp_soc_mean = sum(soc_hz_mean, na.rm = TRUE),
+            comp_soc_sd   = sqrt(sum(soc_hz_sd^2, na.rm = TRUE)), 
+            comp_depth    = sum(thick), .groups = "drop")
 
-# STEP 2: Join with component table and compute the final mapunit spatial properties
 final_mukey_soc <- soc_by_component %>%
-  left_join(select(components, cokey, comppct_r), by = "cokey") %>%
-  mutate(comppct_r = ifelse(is.na(comppct_r), 0, comppct_r)) %>%
-  group_by(mukey) %>%
-  summarize(
-    total_soc_mean_kg_m2 = sum(comp_soc_mean * (comppct_r / 100), na.rm = TRUE),
-    total_soc_sd_kg_m2   = sqrt(sum((comp_soc_sd^2) * (comppct_r / 100), na.rm = TRUE)),
-    total_depth_checked  = max(comp_depth, na.rm = TRUE) # Will now max out at 200cm
-  )
+  dplyr::left_join(dplyr::select(components, cokey, comppct_r), by = "cokey") %>%
+  dplyr::mutate(comppct_r = coalesce(comppct_r, 0)) %>%
+  dplyr::group_by(mukey) %>%
+  dplyr::summarize(total_soc_mean_kg_m2 = sum(comp_soc_mean * (comppct_r / 100), na.rm = TRUE),
+            total_soc_sd_kg_m2   = sqrt(sum((comp_soc_sd^2) * (comppct_r / 100), na.rm = TRUE)),
+            total_depth_checked  = max(comp_depth, na.rm = TRUE))
 
-pts <- terra::vect("/projectnb/dietzelab/dongchen/SDA_disturbance/example_polygon/shp_all/combined_layers.shp")
+if (terra::crs(pts) != terra::crs(mukey.rast)) pts <- terra::project(pts, terra::crs(mukey.rast))
 
-# 1. Ensure Coordinate Systems Match
-if (terra::crs(pts) != terra::crs(mukey.rast)) {
-  pts <- terra::project(pts, terra::crs(mukey.rast))
-}
-
-# 2. Extract Mapunit raster values at point locations
-# Setting ID = FALSE prevents terra from adding an unneeded "ID" column
+### OPTIMIZATION 6: Erased the awful rbind loop. Vectorized match takes 0.01 seconds ###
 extracted_mukeys <- terra::extract(mukey.rast, pts)
-rownames(final_mukey_soc) <- final_mukey_soc$mukey
-soc <- c()
-for (i in seq_along(extracted_mukeys$MUKEY)) {
-  soc <- rbind(soc, final_mukey_soc[as.character(extracted_mukeys$MUKEY[i]),])
+
+names(extracted_mukeys)[2] <- "mukey"
+
+extracted_mukeys$mukey <- as.numeric(extracted_mukeys$mukey)
+final_mukey_soc$mukey <- as.numeric(final_mukey_soc$mukey)
+
+soc <- extracted_mukeys %>%
+  dplyr::left_join(final_mukey_soc, by = "mukey")
+
+save(soc, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/observation_data/soc_ssurgo.Rdata")
+gc()
+
+# Adding the observation and IC scripts at the bottom here, to be re-organized since it seems repetative and disorganized
+
+# GEDI AGB - compared with biomass fia above
+pts <- terra::vect("/shared/users-bucket/mhayden/obs_prep/Kirtland/shp_all/combined_layers.shp")
+dod.shp <- terra::vect("/shared/users-bucket/mhayden/obs_prep/Kirtland/selected_polygons/selected_polygons.shp")
+Dod.shapefile <- terra::vect("/shared/users-bucket/mhayden/obs_prep/Kirtland/DoD_shapefile/Kirtland_AFB.shp")
+
+load("/shared/users-bucket/mhayden/obs_prep/Kirtland/gedi/dat.Rdata")
+start.dates <- c("2018-07-16", "2019-07-16", "2020-07-16", "2021-07-16", "2022-07-16", "2023-07-16")
+end.dates <- c("2019-07-15", "2020-07-15", "2021-07-15", "2022-07-15", "2023-07-15", "2024-07-15")
+ref_dem <- terra::rast("/shared/users-bucket/mhayden/obs_prep/SDA_disturbance/dem_merged/dem_resample.tif")
+r_template <- terra::rast(terra::crop(ref_dem, Dod.shapefile))
+
+
+# loop over time.
+# 1. Create the matrix with 6 columns (to match your 6 dates)
+agb.mean.gedi.ts <- agb.sd.gedi.ts <- matrix(NA, length(pts), 6)
+# 2. Assign the column names
+colnames(agb.mean.gedi.ts) <- colnames(agb.sd.gedi.ts) <- end.dates
+for (i in seq_along(start.dates)) {
+  # filter by date.
+  dat_filtered <- dat %>%
+    mutate(shot_time = as.POSIXct(shot_time)) %>%
+    filter(shot_time >= as.POSIXct(start.dates[i]) & shot_time <= as.POSIXct(end.dates[i])) %>%
+    data.table::setDT()
+  # aggregation.
+  coords <- as.matrix(dat_filtered[, .(lon_lowestmode, lat_lowestmode)])
+  dat_filtered[, cell_id := cellFromXY(r_template, coords)]
+
+  # 2. Count the number of points in each cell (.N is data.table's count function)
+  # (If you wanted mean AGBD instead, you'd do: mean_agbd = mean(agbd, na.rm=TRUE))
+  cell_summary <- dat_filtered[!is.na(cell_id), .(pt_count = .N, mean_agbd = mean(agbd, na.rm = TRUE), max_std = max(agbd_se, na.rm = TRUE)), by = cell_id]
+
+  # 3. Write those summarized values directly into your raster template
+  agb.mean.gedi <- r_template
+  values(agb.mean.gedi) <- NA # Ensure it's blank to start
+  agb.mean.gedi[cell_summary$cell_id] <- cell_summary$mean_agbd
+  
+  agb.sd.gedi <- r_template
+  values(agb.sd.gedi) <- NA # Ensure it's blank to start
+  agb.sd.gedi[cell_summary$cell_id] <- cell_summary$max_std
+  # extraction.
+  agb.m.pts <- terra::extract(agb.mean.gedi * 1, pts)
+  agb.mean.gedi.ts[,i] <- agb.m.pts[,2]
+  
+  agb.sd.pts <- terra::extract(agb.sd.gedi * 1, pts)
+  agb.sd.gedi.ts[,i] <- agb.sd.pts[,2]
 }
-save(soc, file = "/projectnb/dietzelab/dongchen/SDA_disturbance/example_polygon/observation/SOC/soc_ssurgo.Rdata")
-# # check with soilgrids.
-# soc.soilgrids <- terra::rast("/projectnb/dietzelab/dongchen/anchorSites/NA_runs/soil_nc/SOC/SOC.tif")
-# soc.pts <- terra::extract(soc.soilgrids, pts)
+save(list = c("agb.mean.gedi.ts", "agb.sd.gedi.ts"), file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/observation_data/agb_mean_std_gedi.Rdata")
+
+
+# LAI
+LAI <- read.csv("/shared/users-bucket/mhayden/obs_prep/Kirtland/LAI/LAI.csv")
+LAI <- LAI[which(LAI$sd<24.8),]
+LAI$sd[which(LAI$sd == 0)] <- 0.1
 # 
-# plot(soc$total_soc_mean_kg_m2, soc.pts$mean/10)
+dates <- seq(as.Date("2002-07-15"), as.Date("2024-07-15"), "1 year")
+data.table::setDT(LAI)
+# Ensure the date columns are actual Date objects for matching
+LAI[, date_formatted := as.Date(date)] 
+
+LAI.mean.ts <- LAI.std.ts <- matrix(NA, length(pts), 23)
+for (i in seq_along(pts)) {
+  LAI.temp <- LAI[which(LAI$site_id == as.character(i)),]
+  # Create a data.table for your target dates
+  target_dates <- data.table::data.table(target_date = dates)
+  # Join target dates to LAI to find absolute differences
+  closest_records <- target_dates[, {
+    # Calculate absolute difference between this target_date and all LAI dates
+    differences <- abs(as.numeric(LAI.temp$date_formatted - target_date))
+    # Return the row with the minimum difference
+    LAI.temp[which.min(differences), ]
+  }, by = target_date]
+  LAI.mean.ts[i, ] <- closest_records$lai
+  LAI.std.ts[i, ] <- closest_records$sd
+} # results in many NAs for this site because of QC filter in LAI.csv creation
+
+# Moving this over from IC because one of the variables is required below
+var.names.lai <- c("lai_hv", "lai_lv")
+ens <- 100
+lai.list <- list()
+# loop over years.
+# Use this code if there are multiple pixels, if not skip to next.
+for (t in 2000:2024) {
+  ncfile <- file.path("/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/ERA5", paste0("ERA5_", t, ".nc"))
+  era5.temp <- raster::brick(ncfile, varname = "lai_hv", level = 8)
+  lai.temp <- raster::extract(era5.temp, sp::SpatialPoints(cbind(pts$lon, pts$lat)), method = 'simple')
+  lai.temp.h <- rowMeans(lai.temp)
+  
+  era5.temp <- raster::brick(ncfile, varname = "lai_lv", level = 8)
+  lai.temp <- raster::extract(era5.temp, sp::SpatialPoints(cbind(pts$lon, pts$lat)), method = 'simple')
+  lai.temp.l <- rowMeans(lai.temp)
+  
+  # loop over sites.
+  lai.ens.mat <- matrix(NA, length(pts), ens)
+  for (i in seq_along(pts)) {
+    lai.ens.mat[i,] <- runif(ens, lai.temp.l[i], lai.temp.h[i])
+  }
+  lai.list[[t-1999]] <- lai.ens.mat
+}
+
+# There's only one pixel over Kirtland so use this code
+for (t in 2000:2024) {
+  ncfile <- file.path("/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/ERA5", paste0("ERA5_", t, ".nc"))
+  
+  # 1. Open the NetCDF file
+  nc <- nc_open(ncfile)
+  
+  # 2. Extract the raw arrays (these are 8x10 matrices: 8 times x 10 ensemble members)
+  lai_hv_array <- ncvar_get(nc, "lai_hv")
+  lai_lv_array <- ncvar_get(nc, "lai_lv")
+  
+  nc_close(nc)
+  
+  # 3. Calculate the single average value for the entire Kirtland pixel 
+  # (Averaging across the 8 time steps and 10 ensemble members)
+  lai_h_mean <- mean(lai_hv_array, na.rm = TRUE)
+  lai_l_mean <- mean(lai_lv_array, na.rm = TRUE)
+  
+  # 4. Get your min and max bounds for the runif generator
+  min_val <- min(lai_l_mean, lai_h_mean, na.rm = TRUE)
+  max_val <- max(lai_l_mean, lai_h_mean, na.rm = TRUE)
+  
+  # 5. Populate the matrix for all points in your shapefile
+  lai.ens.mat <- matrix(NA, length(pts$lon), ens)
+  
+  for (i in seq_along(pts$lon)) {
+    if (is.finite(min_val) && is.finite(max_val)) {
+      lai.ens.mat[i,] <- runif(ens, min_val, max_val)
+    } else {
+      lai.ens.mat[i,] <- NA
+    }
+  }
+  
+  # Store in the list
+  lai.list[[t-1999]] <- lai.ens.mat
+}
+
+
+save(lai.list, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/initial_condition_data/lai_list.Rdata")
+LAI_IC <- lai.list[[1]]
+
+# Resuming code from Observation
+load("/shared/users-bucket/mhayden/obs_prep/Kirtland/initial_condition_data/lai_list.Rdata")
+lai.mean.2001 <- apply(lai.list[[2]], 1, mean)
+LAI.mean.ts <- cbind(lai.mean.2001, LAI.mean.ts)
+lai.std.2001 <- apply(lai.list[[2]], 1, sd)
+LAI.std.ts <- cbind(lai.mean.2001, LAI.std.ts)
+colnames(LAI.mean.ts) <- colnames(LAI.std.ts) <- seq(as.Date("2001-07-15"), as.Date("2024-07-15"), "1 year") %>% as.character()
+save(list = c("LAI.mean.ts", "LAI.std.ts"), file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/observation_data/lai_mean_std.Rdata")
+
+# CDS Soil moisture
+
+# first piece is from IC script
+pts <- terra::vect("/shared/users-bucket/mhayden/obs_prep/Kirtland/shp_all/combined_layers.shp")
+var.names.sm <- c("swvl1", "swvl2", "swvl3")
+sm.list <- list()
+ens <- 100
+
+# code for multiple pixels from donchen - see below for code that worked for single pixel with chatgsfc
+# loop over years.
+for (t in 2000:2024) {
+  ncfile <- file.path("/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/ERA5", paste0("ERA5_", t, ".nc"))
+  era5.temp.l1 <- raster::brick(ncfile, varname = "swvl1", level = 8)
+  era5.temp.l2 <- raster::brick(ncfile, varname = "swvl2", level = 8)
+  era5.temp.l3 <- raster::brick(ncfile, varname = "swvl3", level = 8)
+  
+  temp.brick <- raster::brick(c(era5.temp.l1, era5.temp.l2, era5.temp.l3))
+  # 1. Extract values from the 3 layers for your spatial points
+  # This returns a matrix where columns represent the layers (swvl1, swvl2, swvl3)
+  sm.extracted <- raster::extract(temp.brick, sp::SpatialPoints(cbind(pts$lon, pts$lat)), method = 'simple')
+
+  # 2. Calculate the depth-weighted mean for 0-1m depth
+  # Weights: swvl1 (0.07), swvl2 (0.21), swvl3 (0.72)
+  sm.depth.weighted <- (0.07 * sm.extracted[,1:10]) + (0.21 * sm.extracted[,11:20]) + (0.72 * sm.extracted[,21:30])
+
+  # 3. Generate the ensemble matrix (Sites x Ensembles)
+  # Assuming you want to add a normal/uniform perturbation around the mean or use standard deviation
+  sm.ens.mat <- matrix(NA, length(pts), ens)
+
+  for (i in seq_along(pts)) {
+    sm.ens.mat[i, ] <- sample(sm.depth.weighted[i,], ens, T)
+  }
+
+  # 4. Save to your list for the current year 't'
+  sm.list[[t-1999]] <- sm.ens.mat
+}
+
+# code that worked for single pixel
+
+# loop over years.
+for (t in 2000:2024) {
+  ncfile <- file.path("/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/ERA5", paste0("ERA5_", t, ".nc"))
+  
+  # 1. Open the NetCDF file
+  nc <- nc_open(ncfile)
+  
+  # 2. Extract the raw 8x10 arrays natively
+  swvl1 <- ncvar_get(nc, "swvl1")
+  swvl2 <- ncvar_get(nc, "swvl2")
+  swvl3 <- ncvar_get(nc, "swvl3")
+  
+  nc_close(nc)
+  
+  # 3. Calculate the depth-weighted mean for 0-1m depth natively on the arrays
+  # This creates a single 8x10 matrix of depth-weighted soil moisture
+  sm_weighted_matrix <- (0.07 * swvl1) + (0.21 * swvl2) + (0.72 * swvl3)
+  
+  # 4. Flatten the 8x10 matrix into a pool of 80 possible values (time x ensemble members)
+  sm_pool <- as.vector(sm_weighted_matrix)
+  
+  # 5. Generate the ensemble matrix (Sites x Ensembles)
+  sm.ens.mat <- matrix(NA, length(pts), ens)
+
+  # For each point, draw 'ens' random samples from the 80 available ERA5 values with replacement
+  for (i in seq_along(pts)) {
+    # We check if the pool is mostly valid numbers to prevent errors
+    if (any(!is.na(sm_pool))) {
+      # sample(pool, size, replace = TRUE)
+      sm.ens.mat[i, ] <- sample(na.omit(sm_pool), ens, replace = TRUE)
+    } else {
+      sm.ens.mat[i, ] <- NA
+    }
+  }
+
+  # 6. Save to your list for the current year 't'
+  sm.list[[t-1999]] <- sm.ens.mat
+}
+
+# Save final outputs
+save(sm.list, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/initial_condition_data/sm_list.Rdata")
+SM_IC <- sm.list[[1]]
+
+# move on to observation piece
+# CDS SM.
+load("/shared/users-bucket/mhayden/obs_prep/Kirtland/initial_condition_data/sm_list.Rdata")
+dates <- seq(as.Date("2001-07-15"), as.Date("2024-07-15"), "1 year")
+sm.mean.era5.ts <- sm.std.era5.ts <- matrix(NA, length(pts), 24)
+colnames(sm.mean.era5.ts) <- colnames(sm.std.era5.ts) <- as.character(dates)
+# loop over time.
+for (i in seq_along(dates)) {
+  temp.sm <- sm.list[[i+1]]
+  sm.mean.era5.ts[,i] <- apply(temp.sm, 1, mean)
+  sm.std.era5.ts[,i] <- apply(temp.sm, 1, sd)
+}
+save(list = c("sm.mean.era5.ts", "sm.std.era5.ts"), file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/observation_data/sm_mean_std_era5.Rdata")
+
+# SOC
+SOC.rast <- terra::rast("/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/SOC.tif")/10
+soc.mean.std.soilgrids <- terra::extract(SOC.rast, pts)
+save(soc.mean.std.soilgrids, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/observation_data/soc_mean_std_soilgrids.Rdata")
+
+# SMAP SM
+SM <- read.csv("/shared/users-bucket/mhayden/obs_prep/Kirtland/SM/SMAP/SMAP.csv")
+dates <- seq(as.Date("2015-07-15"), as.Date("2024-07-15"), "1 year")
+data.table::setDT(SM)
+# Ensure the date columns are actual Date objects for matching
+SM[, date_formatted := as.Date(date)] 
+sm.mean.smap.ts <- sm.std.smap.ts <- matrix(NA, length(pts), length(dates))
+colnames(sm.mean.smap.ts) <- colnames(sm.std.smap.ts) <- as.character(dates)
+for (i in seq_along(pts)) {
+  SM.temp <- SM[which(SM$site_id == as.character(i)),]
+  # Create a data.table for your target dates
+  target_dates <- data.table::data.table(target_date = dates)
+  # Join target dates to LAI to find absolute differences
+  closest_records <- target_dates[, {
+    # Calculate absolute difference between this target_date and all LAI dates
+    differences <- abs(as.numeric(SM.temp$date_formatted - target_date))
+    # Return the row with the minimum difference
+    SM.temp[which.min(differences), ]
+  }, by = target_date]
+  sm.mean.smap.ts[i, ] <- closest_records$smp
+  sm.std.smap.ts[i, ] <- closest_records$sd
+}
+save(list = c("sm.mean.smap.ts", "sm.std.smap.ts"), file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/observation_data/sm_mean_std_smap.Rdata")
+
+
+## Combine observations
+years <- 2001:2024
+obs.path <- "/shared/users-bucket/mhayden/obs_prep/Kirtland/observation_data"
+# AGB
+#load(file.path(obs.path, "AGB", "agb_mean_std_landtrendr.Rdata")) #is this same as just agb no suffix??
+load(file.path(obs.path, "agb_mean_std.Rdata")) #is this same as just agb no suffix??
+load(file.path(obs.path, "agb_mean_std_gedi.Rdata"))
+
+# LAI.
+load(file.path(obs.path, "lai_mean_std.Rdata"))
+
+# SM.
+load(file.path(obs.path, "sm_mean_std_era5.Rdata"))
+load(file.path(obs.path, "sm_mean_std_smap.Rdata"))
+
+# SOC
+load(file.path(obs.path, "soc_mean_std_soilgrids.Rdata"))
+
+# Left off here - need to get SMAP first
+
+# Combine observations
+# loop over time.
+time_points <- seq(as.Date("2001-07-15"), as.Date("2024-07-15"), "1 year")
+obs.mean <- obs.cov <- vector("list", length = length(time_points))
+names(obs.mean) <- time_points
+names(obs.cov) <- time_points
+# try running this for single time point first and then add as source code to run
+source("/shared/users-local/mhayden/SERDP-RC25-4751-1/src/Fort_Hunter_Liggett/functions/run_obs_loop.R")
+for (i in seq_along(time_points)) {
+  print(time_points[i])
+  # initialize annual observation.
+  annual.mean <- annual.cov <- vector("list", length = length(pts))
+  names(annual.mean) <- seq_along(pts)
+  names(annual.cov) <- seq_along(pts)
+  
+  # Annual AGB.
+  if (i <= 17) { # used to be 24 but I didn't do the random forest interpolation at top of script...
+    agb_landtrendr_annual <- list(mean = agb.mean[,i], std = agb.std[,i])
+  } else {
+    agb_landtrendr_annual <- list(mean = rep(NA, length(pts)), std = rep(NA, length(pts)))
+  }
+  if (i >= 19) {
+    agb_gedi_annual <- list(mean = agb.mean.gedi.ts[,as.character(time_points[i])],
+                            std = agb.sd.gedi.ts[,as.character(time_points[i])])
+  } else {
+    agb_gedi_annual <- list(mean = rep(NA, length(pts)), std = rep(NA, length(pts)))
+  }
+  
+  # Annual LAI.
+  lai_annual <- list(mean = LAI.mean.ts[,i], std = LAI.std.ts[,i])
+  
+  # Annual SM.
+  sm_era5_annual <- list(mean = sm.mean.era5.ts[,i], std = sm.std.era5.ts[,i])
+  if (i >= 15) {
+    sm_smap_annual <- list(mean = sm.mean.smap.ts[,as.character(time_points[i])],
+                           std = sm.std.smap.ts[,as.character(time_points[i])])
+  } else {
+    sm_smap_annual <- list(mean = rep(NA, length(pts)), std = rep(NA, length(pts)))
+  }
+  
+  # Annual SOC.
+  soc_annual <- list(mean = soc.mean.std.soilgrids$mean, std = soc.mean.std.soilgrids$std)
+  
+  # loop over sites.
+  for (j in seq_along(pts)) {
+    # LandTrendr, MODIS, ERA5_SM, SoilGrids.
+    if (i >= 1 & i <= 15) {
+      var.names <- c("AbvGrndWood", "LAI", "SoilMoistFrac", "TotSoilCarb")
+      products <- c("LandTrendr", "MODIS", "ERA5_SM", "SoilGrids")
+      vec.mean <- c(agb_landtrendr_annual$mean[j],
+                    lai_annual$mean[j],
+                    sm_era5_annual$mean[j]*100,
+                    soc_annual$mean[j])
+      vec.cov <- diag(c(agb_landtrendr_annual$std[j]^2, 
+                        lai_annual$std[j]^2, 
+                        (sm_era5_annual$std[j]*100)^2, 
+                        soc_annual$std[j]^2))
+    }
+    # LandTrendr, MODIS, ERA5_SM, SMAP, SoilGrids.
+    if (i >= 15 & i <= 19) {
+      var.names <- c("AbvGrndWood", "LAI", "SoilMoistFrac", "SoilMoistFrac", "TotSoilCarb")
+      products <- c("LandTrendr", "MODIS", "ERA5_SM", "SMAP", "SoilGrids")
+      vec.mean <- c(agb_landtrendr_annual$mean[j],
+                    lai_annual$mean[j],
+                    sm_era5_annual$mean[j]*100,
+                    sm_smap_annual$mean[j],
+                    soc_annual$mean[j])
+      vec.cov <- diag(c(agb_landtrendr_annual$std[j]^2, 
+                        lai_annual$std[j]^2, 
+                        (sm_era5_annual$std[j]*100)^2, 
+                        sm_smap_annual$std[j]^2,
+                        soc_annual$std[j]^2))
+    }
+    # LandTrendr, GEDI, MODIS, ERA5_SM, SMAP, SoilGrids.
+    if (i >= 19 & i <= 23) {
+      var.names <- c("AbvGrndWood", "AbvGrndWood", "LAI", "SoilMoistFrac", "SoilMoistFrac", "TotSoilCarb")
+      products <- c("LandTrendr", "GEDI", "MODIS", "ERA5_SM", "SMAP", "SoilGrids")
+      vec.mean <- c(agb_landtrendr_annual$mean[j],
+                    agb_gedi_annual$mean[j],
+                    lai_annual$mean[j],
+                    sm_era5_annual$mean[j]*100,
+                    sm_smap_annual$mean[j],
+                    soc_annual$mean[j])
+      vec.cov <- diag(c(agb_landtrendr_annual$std[j]^2, 
+                        agb_gedi_annual$std[j]^2,
+                        lai_annual$std[j]^2, 
+                        (sm_era5_annual$std[j]*100)^2, 
+                        sm_smap_annual$std[j]^2,
+                        soc_annual$std[j]^2))
+    }
+    # GEDI, MODIS, ERA5_SM, SMAP, SoilGrids.
+    if (i == 24) {
+      var.names <- c("AbvGrndWood", "LAI", "SoilMoistFrac", "SoilMoistFrac", "TotSoilCarb")
+      products <- c("GEDI", "MODIS", "ERA5_SM", "SMAP", "SoilGrids")
+      vec.mean <- c(agb_gedi_annual$mean[j],
+                    lai_annual$mean[j],
+                    sm_era5_annual$mean[j]*100,
+                    sm_smap_annual$mean[j],
+                    soc_annual$mean[j])
+      vec.cov <- diag(c(agb_gedi_annual$std[j]^2,
+                        lai_annual$std[j]^2, 
+                        (sm_era5_annual$std[j]*100)^2, 
+                        sm_smap_annual$std[j]^2,
+                        soc_annual$std[j]^2))
+    }
+    na_ind <- which(is.na(diag(vec.cov)))
+    if (length(na_ind) > 0) {
+      if(length(vec.mean) == 1){
+        vec.cov <- vec.cov[-na_ind]
+      }else{
+        vec.cov <- vec.cov[-na_ind, -na_ind]
+      }
+      products <- products[-na_ind]
+      vec.mean <- vec.mean[-na_ind]
+      vec.mean <- data.frame(matrix(vec.mean, 1)) %>% `colnames<-`(var.names[-na_ind])
+      names(vec.mean) <- var.names[-na_ind]
+    } else {
+      vec.mean <- data.frame(matrix(vec.mean, 1)) %>% `colnames<-`(var.names)
+    }
+    # add attributes.
+    for (k in seq_along(products)) {
+      attr(vec.mean[[k]], "source") <- products[k]
+    }
+    annual.mean[[j]] <- vec.mean
+    annual.cov[[j]] <- vec.cov
+  }
+  obs.mean[[i]] <- annual.mean
+  obs.cov[[i]] <- annual.cov
+}
+save(obs.mean, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/obs.mean.Rdata")
+save(obs.cov, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/obs.cov.Rdata")
+
+# remove ERA5 observation.
+
+load("/shared/users-bucket/mhayden/obs_prep/Kirtland/obs.mean.Rdata")
+load("/shared/users-bucket/mhayden/obs_prep/Kirtland/obs.cov.Rdata")
+
+# 2. Loop through years (i) and polygons/sites (j)
+for (i in seq_along(obs.mean)) {
+  for (j in seq_along(obs.mean[[i]])) {
+    
+    # Get the current list of variables for this site
+    current_mean <- obs.mean[[i]][[j]]
+    current_cov  <- obs.cov[[i]][[j]]
+    
+    # Identify which columns/elements do NOT have the "ERA5_SM" attribute
+    keep_indices <- sapply(seq_along(current_mean), function(k) {
+      src_attr <- attr(current_mean[[k]], "source")
+      is.null(src_attr) || src_attr != "ERA5_SM"
+    })
+    
+    # If any ERA5_SM variables were found, filter them out
+    if (!all(keep_indices)) {
+      # Filter the data frame columns/list elements
+      obs.mean[[i]][[j]] <- current_mean[keep_indices]
+      
+      # Subset the covariance matrix symmetrically (both rows and columns)
+      if (is.matrix(current_cov) || is.data.frame(current_cov)) {
+        obs.cov[[i]][[j]] <- current_cov[keep_indices, keep_indices, drop = FALSE]
+      } else {
+        obs.cov[[i]][[j]] <- current_cov[keep_indices]
+      }
+    }
+  }
+}
+
+# 3. Save the cleaned versions back to disk
+save(obs.mean, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/obs.mean_noERA5_SM.Rdata")
+save(obs.cov, file = "/shared/users-bucket/mhayden/obs_prep/Kirtland/obs.cov_noERA5_SM.Rdata")
